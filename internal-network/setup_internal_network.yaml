@@ -1,0 +1,58 @@
+---
+- hosts: localhost
+  vars:
+    VARS_FILE: vars/vars.yaml
+    KEY_OUT_FILE: "vars.populated.yaml"
+    KEY_GENERATOR_SCRIPT: ./scripts/generate_config.sh
+
+  tasks:
+    # - name: check if keys directory exists
+    #   ansible.builtin.find:
+    #     path: "{{ KEYS_DIRECTORY }}"
+    #   register: keys_exists
+
+    # - name: abort if {{ KEYS_DIRECTORY }} exists
+    #   ansible.builtin.fail:
+    #     msg: "'{{ KEYS_DIRECTORY }}' directory is not empty. make sure you have a backup" 
+    #   when: keys_exists.matched > 0
+
+    # - name: if keys doesn't exists, create it
+    #   ansible.builtin.file:
+    #     path: "{{ KEYS_DIRECTORY }}"
+    #     state: directory
+    #     mode: 0755
+    #   when: keys_exists.matched == 0
+
+    - name: create private key if keys directory doesn't exist
+      ansible.builtin.shell:
+        cmd: "{{ KEY_GENERATOR_SCRIPT }} {{ VARS_FILE }} {{ KEY_OUT_FILE }}"
+      # when: keys_exists.matched == 0
+      # when: not keys_dir.stat.exists
+      #
+- hosts: localhost
+  vars_files:
+    - vars.populated.yaml
+  tasks:
+    - name: generate server config
+      ansible.builtin.template:
+        src: internal.conf
+        dest: internal.populated.conf
+    - name: generate peers config
+      ansible.builtin.template:
+        src: internal_peer.conf
+        dest: internal_{{ item.name }}.populated.conf
+      loop: "{{ peers }}"
+
+# - hosts: server
+#   tasks:
+#     - name: install wireguard
+#       ansbile.builtin.package:
+#         name: 
+#           - wireguard
+#       state: latest
+    
+#     - name: copy wireguard config
+
+    # - name: generate servers private and public key
+    #   ansible.builtin.shell:
+    #     cmd: wg genkey | tee keys/privatekey | wg pubkey > keys/publickey
