@@ -1,3 +1,4 @@
 out/
 inventory
 ansible.cfg
+.vagrant/
