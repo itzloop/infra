@@ -1,56 +1,110 @@
 ---
 - hosts: localhost
   vars:
+    OUT_DIR: out
     VARS_FILE: vars/vars.yaml
-    KEY_OUT_FILE: "vars.populated.yaml"
+    VARS_OUT_FILE: "{{ OUT_DIR }}/vars.populated.yaml"
     KEY_GENERATOR_SCRIPT: ./scripts/generate_config.sh
 
   tasks:
-    # - name: check if keys directory exists
-    #   ansible.builtin.find:
-    #     path: "{{ KEYS_DIRECTORY }}"
-    #   register: keys_exists
+    - name: check if '{{ OUT_DIR }}' directory exists
+      ansible.builtin.find:
+        path: "{{ OUT_DIR }}"
+      register: keys_exists
 
     # - name: abort if {{ KEYS_DIRECTORY }} exists
     #   ansible.builtin.fail:
     #     msg: "'{{ KEYS_DIRECTORY }}' directory is not empty. make sure you have a backup" 
     #   when: keys_exists.matched > 0
 
-    # - name: if keys doesn't exists, create it
-    #   ansible.builtin.file:
-    #     path: "{{ KEYS_DIRECTORY }}"
-    #     state: directory
-    #     mode: 0755
-    #   when: keys_exists.matched == 0
+    - name: if '{{ OUT_DIR }}' doesn't exists, create it
+      ansible.builtin.file:
+        path: "{{ OUT_DIR }}"
+        state: directory
+        mode: 0755
+      when: keys_exists.matched == 0
 
     - name: create private key if keys directory doesn't exist
       ansible.builtin.shell:
-        cmd: "{{ KEY_GENERATOR_SCRIPT }} {{ VARS_FILE }} {{ KEY_OUT_FILE }}"
-      # when: keys_exists.matched == 0
-      # when: not keys_dir.stat.exists
-      #
-- hosts: localhost
-  vars_files:
-    - vars.populated.yaml
-  tasks:
+        cmd: "{{ KEY_GENERATOR_SCRIPT }} {{ VARS_FILE }} {{ VARS_OUT_FILE }}"
+
+    - name: include generated vars file
+      include_vars:
+        file: '{{ VARS_OUT_FILE }}' 
+
     - name: generate server config
       ansible.builtin.template:
         src: internal.conf
-        dest: internal.populated.conf
+        dest: '{{ OUT_DIR }}/internal.populated.conf'
+
     - name: generate peers config
       ansible.builtin.template:
         src: internal_peer.conf
-        dest: internal_{{ item.name }}.populated.conf
+        dest: '{{ OUT_DIR }}/internal_{{ item.name }}.populated.conf'
       loop: "{{ peers }}"
+      # when: keys_exists.matched == 0
+      # when: not keys_dir.stat.exists
+      #
 
-# - hosts: server
-#   tasks:
-#     - name: install wireguard
-#       ansbile.builtin.package:
-#         name: 
-#           - wireguard
-#       state: latest
-    
+- hosts: multi
+  become: true
+  vars:
+    OUT_DIR: out
+    VARS_FILE: vars/vars.yaml
+    VARS_OUT_FILE: "{{ OUT_DIR }}/vars.populated.yaml"
+    KEY_GENERATOR_SCRIPT: ./scripts/generate_config.sh
+  vars_files:
+    - '{{ VARS_OUT_FILE }}'
+  tasks:
+    - name: make sure wireguard is installed 
+      ansible.builtin.package:
+        name: 
+          - wireguard
+          - openresolv
+        state: present
+        update_cache: true
+      
+    - name: reboot machines
+      ansible.builtin.reboot:
+
+- hosts: server
+  become: true
+  vars:
+    OUT_DIR: out
+    VARS_FILE: vars/vars.yaml
+    VARS_OUT_FILE: "{{ OUT_DIR }}/vars.populated.yaml"
+    KEY_GENERATOR_SCRIPT: ./scripts/generate_config.sh
+  vars_files:
+    - '{{ VARS_OUT_FILE }}'
+  tasks:  
+    - name: copy server config to server
+      ansible.builtin.copy:
+        src: '{{ OUT_DIR }}/internal.populated.conf'
+        dest: /etc/wireguard/wg-server.conf
+        mode: 0600
+    - name: bring up wireguard
+      ansible.builtin.shell:
+        cmd: wg-quick up wg-server
+
+- hosts: peers
+  become: true
+  vars:
+    OUT_DIR: out
+    VARS_FILE: vars/vars.yaml
+    VARS_OUT_FILE: "{{ OUT_DIR }}/vars.populated.yaml"
+    KEY_GENERATOR_SCRIPT: ./scripts/generate_config.sh
+  vars_files:
+    - '{{ VARS_OUT_FILE }}'
+  tasks:  
+    - name: copy each peer's config
+      ansible.builtin.copy:
+        src: '{{ OUT_DIR }}/internal_{{ peer }}.populated.conf'
+        dest: /etc/wireguard/wg-peer.conf
+        mode: 0600
+
+    - name: bring up wireguard
+      ansible.builtin.shell:
+        cmd: wg-quick up wg-peer
 #     - name: copy wireguard config
 
     # - name: generate servers private and public key
